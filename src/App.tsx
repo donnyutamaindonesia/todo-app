@@ -1,60 +1,174 @@
 import { useState, useEffect } from 'react'
+import { supabase } from './lib/supabase'
+import Auth from './components/Auth'
+import type { User } from '@supabase/supabase-js'
 import './App.css'
 
 interface Todo {
-  id: number
+  id: string
   text: string
   done: boolean
+  priority: 'low' | 'medium' | 'high'
+  category: string
+  due_date: string | null
 }
 
-function App() {
-  const [todos, setTodos] = useState<Todo[]>(() => {
-    const saved = localStorage.getItem('todos')
-    return saved ? JSON.parse(saved) : []
-  })
+const PRIORITIES = [
+  { value: 'high', label: '高', color: '#ff4d4f' },
+  { value: 'medium', label: '中', color: '#faad14' },
+  { value: 'low', label: '低', color: '#52c41a' },
+]
+
+export default function App() {
+  const [user, setUser] = useState<User | null>(null)
+  const [todos, setTodos] = useState<Todo[]>([])
   const [input, setInput] = useState('')
+  const [priority, setPriority] = useState<'low' | 'medium' | 'high'>('medium')
+  const [category, setCategory] = useState('')
+  const [dueDate, setDueDate] = useState('')
+  const [filterDone, setFilterDone] = useState<'all' | 'active' | 'done'>('all')
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    localStorage.setItem('todos', JSON.stringify(todos))
-  }, [todos])
+    supabase.auth.getSession().then(({ data }) => {
+      setUser(data.session?.user ?? null)
+      setLoading(false)
+    })
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null)
+    })
+    return () => listener.subscription.unsubscribe()
+  }, [])
 
-  const addTodo = () => {
+  useEffect(() => {
+    if (user) fetchTodos()
+  }, [user])
+
+  const fetchTodos = async () => {
+    const { data } = await supabase
+      .from('todos')
+      .select('*')
+      .order('created_at', { ascending: false })
+    if (data) setTodos(data)
+  }
+
+  const addTodo = async () => {
     const text = input.trim()
-    if (!text) return
-    setTodos([...todos, { id: Date.now(), text, done: false }])
-    setInput('')
+    if (!text || !user) return
+    const { data } = await supabase.from('todos').insert({
+      user_id: user.id,
+      text,
+      done: false,
+      priority,
+      category: category.trim(),
+      due_date: dueDate || null,
+    }).select().single()
+    if (data) {
+      setTodos([data, ...todos])
+      setInput('')
+      setCategory('')
+      setDueDate('')
+      setPriority('medium')
+    }
   }
 
-  const toggleTodo = (id: number) => {
-    setTodos(todos.map(t => t.id === id ? { ...t, done: !t.done } : t))
+  const toggleTodo = async (id: string, done: boolean) => {
+    await supabase.from('todos').update({ done: !done }).eq('id', id)
+    setTodos(todos.map(t => t.id === id ? { ...t, done: !done } : t))
   }
 
-  const deleteTodo = (id: number) => {
+  const deleteTodo = async (id: string) => {
+    await supabase.from('todos').delete().eq('id', id)
     setTodos(todos.filter(t => t.id !== id))
   }
 
+  const logout = () => supabase.auth.signOut()
+
+  const filtered = todos.filter(t => {
+    if (filterDone === 'active') return !t.done
+    if (filterDone === 'done') return t.done
+    return true
+  })
+
+  if (loading) return <div className="loading">加载中...</div>
+  if (!user) return <Auth />
+
   return (
     <div className="app">
-      <h1>菠萝芯的待办清单</h1>
+      <div className="header">
+        <h1>待办清单</h1>
+        <div className="user-info">
+          <span>{user.email}</span>
+          <button className="logout-btn" onClick={logout}>退出</button>
+        </div>
+      </div>
 
-      <div className="input-row">
-        <input
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && addTodo()}
-          placeholder="添加新任务..."
-        />
-        <button onClick={addTodo}>添加</button>
+      <div className="input-section">
+        <div className="input-row">
+          <input
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && addTodo()}
+            placeholder="添加新任务..."
+          />
+          <button onClick={addTodo}>添加</button>
+        </div>
+        <div className="input-meta">
+          <select value={priority} onChange={e => setPriority(e.target.value as 'low' | 'medium' | 'high')}>
+            {PRIORITIES.map(p => (
+              <option key={p.value} value={p.value}>优先级：{p.label}</option>
+            ))}
+          </select>
+          <input
+            type="text"
+            value={category}
+            onChange={e => setCategory(e.target.value)}
+            placeholder="分类（可选）"
+          />
+          <input
+            type="date"
+            value={dueDate}
+            onChange={e => setDueDate(e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div className="filter-row">
+        {(['all', 'active', 'done'] as const).map(f => (
+          <button
+            key={f}
+            className={filterDone === f ? 'active' : ''}
+            onClick={() => setFilterDone(f)}
+          >
+            {f === 'all' ? '全部' : f === 'active' ? '未完成' : '已完成'}
+          </button>
+        ))}
       </div>
 
       <ul className="todo-list">
-        {todos.length === 0 && <li className="empty">暂无任务，休息一下吧~</li>}
-        {todos.map(todo => (
-          <li key={todo.id} className={todo.done ? 'done' : ''}>
-            <span onClick={() => toggleTodo(todo.id)}>{todo.text}</span>
-            <button className="delete" onClick={() => deleteTodo(todo.id)}>删除</button>
-          </li>
-        ))}
+        {filtered.length === 0 && <li className="empty">暂无任务，休息一下吧~</li>}
+        {filtered.map(todo => {
+          const p = PRIORITIES.find(p => p.value === todo.priority)!
+          return (
+            <li key={todo.id} className={`todo-item ${todo.done ? 'done' : ''}`}>
+              <div className="todo-main">
+                <span className="priority-dot" style={{ background: p.color }} title={p.label} />
+                <span className="todo-text" onClick={() => toggleTodo(todo.id, todo.done)}>
+                  {todo.text}
+                </span>
+                <button className="delete" onClick={() => deleteTodo(todo.id)}>删除</button>
+              </div>
+              <div className="todo-meta">
+                {todo.category && <span className="tag">{todo.category}</span>}
+                {todo.due_date && (
+                  <span className={`due ${new Date(todo.due_date) < new Date() && !todo.done ? 'overdue' : ''}`}>
+                    📅 {todo.due_date}
+                  </span>
+                )}
+              </div>
+            </li>
+          )
+        })}
       </ul>
 
       <p className="stats">
@@ -63,5 +177,3 @@ function App() {
     </div>
   )
 }
-
-export default App
