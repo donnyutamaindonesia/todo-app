@@ -27,8 +27,10 @@ export default function Auth() {
   return (
     <div className="auth-container">
       <div className="auth-box">
-        <h1>菠萝芯的待办清单</h1>
-        <p className="auth-subtitle">{isLogin ? '登录你的账号' : '创建新账号'}</p>
+        <h1>大鹭科技(泉州)有限公司</h1>
+        <p className="auth-subtitle">
+          {isLogin ? '登录你的账号' : '创建一个新账号'}
+        </p>
 
         <input
           type="email"
@@ -46,14 +48,14 @@ export default function Auth() {
 
         {message && <p className="auth-message">{message}</p>}
 
-        <button className="auth-btn" onClick={handleSubmit} disabled={loading}>
-          {loading ? '处理中...' : isLogin ? '登录' : '注册'}
+        <button onClick={handleSubmit} disabled={loading}>
+          {loading ? '加载中...' : isLogin ? '登录' : '注册'}
         </button>
 
         <p className="auth-switch">
           {isLogin ? '还没有账号？' : '已有账号？'}
           <span onClick={() => { setIsLogin(!isLogin); setMessage('') }}>
-            {isLogin ? '立即注册' : '去登录'}
+            {isLogin ? '立即注册' : '立即登录'}
           </span>
         </p>
       </div>
